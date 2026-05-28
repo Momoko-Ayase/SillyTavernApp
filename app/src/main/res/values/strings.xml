@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">SillyTavern</string>
+    <string name="starting_server">Starting SillyTavern…</string>
+    <string name="need_storage">This app needs All-Files access to store data at
+        /storage/emulated/0/Documents/SillyTavern.
+    </string>
+    <string name="server_stopped">SillyTavern server stopped (exit code %1$d). Check logcat (SILLYTAVERN-NODE).</string>
+</resources>
