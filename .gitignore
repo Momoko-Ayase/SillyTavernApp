@@ -1,6 +1,11 @@
 # Self-built Node 24 runtime (libnode.so + headers). Build per README; not committed.
 /app/libnode/
 
+# Self-built static git binaries (libgit.so + libgitremotehttps.so) and the
+# CA bundle for git TLS. Build per README; not committed.
+/app/libgit/
+/app/src/main/assets/git/
+
 # Bundled SillyTavern install: clone + npm install per README; not committed.
 # Keep our mobile-tuned config.yaml under version control.
 /app/src/main/assets/nodejs-project/*

@@ -12,11 +12,13 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.*
 import android.provider.Settings
+import android.util.Base64
 import android.view.View
-import android.webkit.JavascriptInterface
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
+import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.NotificationCompat
@@ -42,6 +44,15 @@ class MainActivity : AppCompatActivity() {
     private val url = "http://127.0.0.1:${NodeService.PORT}/"
     private val main = Handler(Looper.getMainLooper())
     private var started = false
+
+    // File import (<input type=file>) via the system document picker.
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+
+    // File export: bytes intercepted from a blob/data download, written to a
+    // user-chosen location via the SAF "Save to…" dialog.
+    private var pendingSaveBytes: ByteArray? = null
+    private lateinit var saveDocLauncher: ActivityResultLauncher<Intent>
 
     private val BUSY_POLL_MS = 5000L
     private var idleRunnable: Runnable? = null
@@ -111,7 +122,93 @@ class MainActivity : AppCompatActivity() {
                 injectAppScripts()
             }
         }
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                params: FileChooserParams?
+            ): Boolean {
+                // Resolve any stale pending chooser so the old <input> doesn't hang.
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+
+                val mimeTypes = params?.acceptTypes
+                    ?.filter { it.isNotBlank() && it.contains("/") }
+                    ?: emptyList()
+
+                val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    // ACTION_OPEN_DOCUMENT requires a type; widen to */* when unknown.
+                    type = mimeTypes.firstOrNull() ?: "*/*"
+                    if (mimeTypes.size > 1) {
+                        putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes.toTypedArray())
+                    }
+                    if (params?.mode == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    }
+                }
+                return try {
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (_: ActivityNotFoundException) {
+                    fileChooserCallback = null
+                    false
+                }
+            }
+        }
         webView.addJavascriptInterface(WebAppBridge(), "STAndroid")
+
+        fileChooserLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val cb = fileChooserCallback ?: return@registerForActivityResult
+            fileChooserCallback = null
+            val uris: Array<Uri>? = if (result.resultCode == RESULT_OK) {
+                val data = result.data
+                when {
+                    data?.clipData != null -> {
+                        val clip = data.clipData!!
+                        Array(clip.itemCount) { clip.getItemAt(it).uri }
+                    }
+
+                    data?.data != null -> arrayOf(data.data!!)
+                    else -> null
+                }
+            } else null
+            // Must always answer the callback (even null) or the <input> hangs.
+            cb.onReceiveValue(uris)
+        }
+
+        saveDocLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val bytes = pendingSaveBytes
+            pendingSaveBytes = null
+            if (result.resultCode == RESULT_OK && bytes != null) {
+                val uri = result.data?.data
+                val ok = uri != null && runCatching {
+                    contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                }.isSuccess
+                Toast.makeText(
+                    this, if (ok) "Saved" else "Save failed", Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        // WebView in-page back navigation; fall through to default (finish/back
+        // gesture) when there's no page history. Replaces the deprecated
+        // onBackPressed override (no longer called for predictive back gestures).
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
         requestNotificationPermission()
 
         if (!hasAllFilesAccess()) {
@@ -257,11 +354,6 @@ class MainActivity : AppCompatActivity() {
         busyPoll = null
     }
 
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
-    }
-
     // ---- Web -> native bridge (exposed as window.STAndroid) ----
     inner class WebAppBridge {
         @JavascriptInterface
@@ -276,8 +368,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         @JavascriptInterface
-        fun notifyAiResponded(title: String, body: String) {
+        fun notifyAi(title: String, body: String) {
             main.post { postAiNotification(title, body) }
+        }
+
+        @JavascriptInterface
+        fun saveFile(name: String, base64: String, mime: String) {
+            val bytes = runCatching { Base64.decode(base64, Base64.DEFAULT) }
+                .getOrNull() ?: return
+            main.post {
+                pendingSaveBytes = bytes
+                val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = if (mime.isNotBlank()) mime else "application/octet-stream"
+                    putExtra(Intent.EXTRA_TITLE, name.ifBlank { "download" })
+                }
+                try {
+                    saveDocLauncher.launch(intent)
+                } catch (_: ActivityNotFoundException) {
+                    pendingSaveBytes = null
+                }
+            }
         }
     }
 

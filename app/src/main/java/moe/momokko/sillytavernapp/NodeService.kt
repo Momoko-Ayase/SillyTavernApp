@@ -52,10 +52,18 @@ class NodeService : Service() {
         nodeStarted = true
         Thread {
             val projectDir = AssetExtractor.ensureProject(applicationContext)
-            File(DATA_ROOT).also { if (!it.exists()) it.mkdirs() }
+            File(DATA_ROOT).also { dir ->
+                if (!dir.exists()) dir.mkdirs()
+                // Keep exported images/files out of the gallery / media scanner.
+                // A .nomedia at the tree root applies recursively.
+                runCatching { File(dir, ".nomedia").takeIf { !it.exists() }?.createNewFile() }
+            }
             NodeBridge.setEnv("NODE_ENV", "production")
             NodeBridge.setEnv("TMPDIR", applicationContext.cacheDir.absolutePath)
             NodeBridge.setEnv("HOME", applicationContext.filesDir.absolutePath)
+            // Put the bundled static git on PATH so SillyTavern's simple-git
+            // calls (extension update/version/branches/switch) work.
+            GitSetup.configure(applicationContext)
             // Default cwd is read-only; ST writes config.yaml/whitelist.txt relative to cwd.
             // Move into the writable extracted project dir so those writes succeed.
             NodeBridge.chDir(projectDir)

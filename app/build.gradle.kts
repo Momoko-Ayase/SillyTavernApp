@@ -15,8 +15,8 @@ android {
         applicationId = "moe.momokko.sillytavernapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -37,10 +37,13 @@ android {
         }
     }
 
-    // Package the prebuilt libnode.so from libnode/bin/.
+    // Package the prebuilt libnode.so from libnode/bin/ and the static git
+    // binaries from libgit/bin/ (both land in nativeLibraryDir, the only
+    // place Android lets us execute from).
     sourceSets {
         getByName("main") {
             jniLibs.srcDir("libnode/bin")
+            jniLibs.srcDir("libgit/bin")
         }
     }
 
