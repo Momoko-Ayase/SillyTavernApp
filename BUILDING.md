@@ -129,15 +129,11 @@ make -j"$(nproc)" && make install
 git cross-compiles via plain `make` (not `./configure`, which would try to run target binaries). Create
 `config.mak` in the git source dir:
 
-# NOTE: git is compiled with the android28 clang (not android26): getrandom() is
-
-# only declared at API >= 28. The binary is static and run as its own process, so
-
-# this is independent of the app's minSdk 26 and still runs on API 26 devices
-
-# (getrandom is a thin wrapper over the __NR_getrandom syscall present on all
-
-# Android-26 kernels). The deps (zlib/openssl/curl) can stay at API 26.
+> NOTE: git is compiled with the android28 clang (not android26): `getrandom()` is
+> only declared at API >= 28. The binary is static and run as its own process, so
+> this is independent of the app's minSdk 26 and still runs on API 26 devices
+> (`getrandom` is a thin wrapper over the `__NR_getrandom` syscall present on all
+> Android-26 kernels). The deps (zlib/openssl/curl) can stay at API 26.
 
 ```make
 CC = aarch64-linux-android28-clang
